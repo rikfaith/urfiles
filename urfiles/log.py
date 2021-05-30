@@ -55,6 +55,10 @@ class PDLog():
             logging.Formatter.__init__(self)
 
         def format(self, record):
+            # We pass a secret parameter called _depth from our internal
+            # routines so that we can correct the stack offset.
+            depth = record.__dict__.get('_depth', 0)
+
             level = record.levelname[0]
             date = time.localtime(record.created)
             date_msec = (record.created - int(record.created)) * 1000
@@ -62,7 +66,7 @@ class PDLog():
                 level,
                 date.tm_year, date.tm_mon, date.tm_mday,
                 date.tm_hour, date.tm_min, date.tm_sec, date_msec)
-            caller = inspect.getframeinfo(inspect.stack()[9][0])
+            caller = inspect.getframeinfo(inspect.stack()[9+depth][0])
             filename = '/'.join(caller.filename.split('/')[-2:])
             lineno = ' %s:%d' % (filename, caller.lineno)
             pid = ' %d' % os.getpid()
@@ -114,14 +118,15 @@ class PDLog():
 
     @staticmethod
     def fatal(message, *args, **kwargs):
-        logging.fatal(message, *args, **kwargs)
+        logging.fatal(message, *args, **kwargs, extra={'_depth': 1})
         sys.exit(1)
 
     @staticmethod
     def decode(message, *args, **kwargs):
         exc_type, exc_value = sys.exc_info()[:2]
         exc = traceback.format_exception_only(exc_type, exc_value)
-        logging.error(message + ': ' + exc[0].strip(), *args, **kwargs)
+        logging.error(message + ': ' + exc[0].strip(), *args, **kwargs,
+                      extra={'_depth': 1})
 
     @staticmethod
     def get_stack_from_traceback(exc_traceback):
@@ -136,7 +141,8 @@ class PDLog():
     @staticmethod
     def traceback(exc_traceback, message, *args, **kwargs):
         stack = PDLog.get_stack_from_traceback(exc_traceback)
-        logging.error(message + ' (%s)' % stack, *args, **kwargs)
+        logging.error(message + ' (%s)' % stack, *args, **kwargs,
+                      extra={'_depth': 1})
 
 
 # Define global aliases to debugging functions.

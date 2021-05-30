@@ -14,7 +14,7 @@ import time
 from urfiles.log import DEBUG, INFO, ERROR, FATAL, TRACEBACK
 
 class Scan():
-    def __init__(self, directories, max_workers=1, debug=False):
+    def __init__(self, directories, max_workers=3, debug=False):
         self.directories = directories
         self.max_workers = max_workers
         self.debug = debug
@@ -30,6 +30,9 @@ class Scan():
 
     @staticmethod
     def _directory(idx, dirname, workq, resultq):
+        if not os.access(dirname, os.X_OK | os.R_OK):
+            resultq.put((idx, 'noaccess', dirname))
+            return
         with os.scandir(dirname) as entries:
             for entry in entries:
                 if entry.name in ['.', '..']:
@@ -42,42 +45,58 @@ class Scan():
 
     @staticmethod
     def _worker(idx, workq, resultq):
+        def internal_worker(idx, workq, resultq):
+            working = True
+            while True:
+                try:
+                    command, basename, dirname = workq.get(True, 1)
+                except queue.Empty:
+                    if working:
+                        resultq.put((idx, 'idle', None))
+                    working = False
+                    time.sleep(1)
+                    continue
+
+                if command == 'quit':
+                    resultq.put((idx, 'quit', None))
+                    return
+
+                if command != 'entry':
+                    resultq.put((idx, 'error', command + ':' + dirname))
+
+                working = True
+
+                if basename is not None:
+                    fulldirname = os.path.join(basename, dirname)
+                else:
+                    fulldirname = dirname
+
+                try:
+                    statinfo = os.stat(fulldirname)
+                except FileNotFoundError as exception:
+                    resultq.put((idx, 'notfound',
+                                 fulldirname + ': ' + repr(exception)))
+                    continue
+                except OSError as exception:
+                    resultq.put((idx, 'oserror',
+                                 fulldirname + ': ' + repr(exception)))
+                    continue
+
+                if stat.S_ISDIR(statinfo.st_mode):
+                    Scan._directory(idx, fulldirname, workq, resultq)
+                else:
+                    Scan._file(idx, fulldirname, workq, resultq)
+
         assert workq
         assert resultq
         resultq.put((idx, 'starting'), True)
-        working = True
-        while True:
-            try:
-                command, basename, dirname = workq.get(True, 1)
-            except queue.Empty:
-                if working:
-                    resultq.put((idx, 'idle', None))
-                working = False
-                time.sleep(1)
-                continue
+        internal_worker(idx, workq, resultq)
+        return
+        try:
+            internal_worker(idx, workq, resultq)
+        except Exception as exception:
+            resultq.put((idx, 'error', repr(exception)))
 
-            if command == 'quit':
-                return
-            if command != 'entry':
-                resultq.put((idx, 'error', None))
-
-            working = True
-            resultq.put((idx, 'working', None))
-
-            if basename is not None:
-                fulldirname = os.path.join(basename, dirname)
-            else:
-                fulldirname = dirname
-
-            try:
-                statinfo = os.stat(fulldirname)
-            except FileNotFoundError:
-                continue
-
-            if stat.S_ISDIR(statinfo.st_mode):
-                Scan._directory(idx, fulldirname, workq, resultq)
-            else:
-                Scan._file(idx, fulldirname, workq, resultq)
 
     @staticmethod
     def _done_callback(idx, future):
@@ -95,7 +114,8 @@ class Scan():
         resultq = manager.Queue()
         resultq.put((-1, 'test'))
         futures = []
-        INFO('starting')
+        INFO('Starting {} concurrent worker(s)'.format(self.max_workers))
+        message_time = 0
         with concurrent.futures.ProcessPoolExecutor(
                 max_workers=self.max_workers) as executor:
             for idx in range(self.max_workers):
@@ -104,12 +124,15 @@ class Scan():
                 future.add_done_callback(
                     lambda future, idx=idx: self._done_callback(idx, future))
 
-            INFO('filling')
+            INFO('Filling the queue from {} directory'.format(
+                len(self.directories)))
             # Fill the queue
             for directory in self.directories:
                 if directory[0] == '/':
+                    INFO('Adding {}'.format(directory))
                     workq.put(('entry', None, directory))
                 else:
+                    INFO('Adding {} in {}'.format(directory, os.getcwd()))
                     workq.put(('entry', os.getcwd(), directory))
 
             # Get results
@@ -117,12 +140,17 @@ class Scan():
             while True:
                 for idx, future in enumerate(futures):
                     if not future.running():
+                        INFO('worker {} is no longer running'.format(idx))
                         working[idx] = False
+                        quit()
 #                INFO('workq size = %d', workq.qsize())
 #                INFO('resultq size = %d', resultq.qsize())
                 try:
                     result = resultq.get(False)
-                    INFO('RESULT QUEUE: %s', result)
+                    if time.time() - message_time > 1.5:
+                        message_time = time.time()
+                        INFO('running w=%d r=%d w=%d', workq.qsize(),
+                             resultq.qsize(), sum(working))
                     if result[1] == 'working':
                         working[result[0]] = True
                         continue
