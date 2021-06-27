@@ -3,19 +3,23 @@
 
 # We use multiprocessing.Queue, so importing queue only for queue.Empty
 import concurrent.futures
+import hashlib
 import multiprocessing
 import os
 import queue
 import stat
 import sys
 import time
+import traceback
+import urfiles.config
 
 # pylint: disable=unused-import
-from urfiles.log import DEBUG, INFO, ERROR, FATAL, TRACEBACK
+from urfiles.log import DEBUG, INFO, ERROR, FATAL
 
 class Scan():
-    def __init__(self, directories, max_workers=3, debug=False):
+    def __init__(self, directories, config, max_workers=3, debug=False):
         self.directories = directories
+        self.config = config
         self.max_workers = max_workers
         self.debug = debug
 
@@ -40,12 +44,23 @@ class Scan():
                 workq.put(('entry', dirname, entry.name))
 
     @staticmethod
-    def _file(idx, filename, workq, resultq):
-        resultq.put((idx, 'file', filename))
+    def _file(db, conn, statinfo, idx, path, workq, resultq):
+        ids = db.lookup_path(conn, path)
+        INFO('ids=%s', str(repr(ids)))
+        for id in ids:
+            metadata = db.lookup_file(conn, id)
+            resultq.put((idx, 'metadata', metadata))
+            _, md5sum, bytes, mtime_ns = metadata
+            if bytes == statinfo.st_size and mtime_ns == statinfo.st_mtime_ns:
+                return
+        file_id = db.insert_file(conn, 0, statinfo.st_size,
+                                 statinfo.st_mtime_ns)
+        if file_id is not None:
+            db.insert_path(conn, path, file_id)
 
     @staticmethod
-    def _worker(idx, workq, resultq):
-        def internal_worker(idx, workq, resultq):
+    def _worker(config, idx, workq, resultq):
+        def internal_worker(db, conn, idx, workq, resultq):
             working = True
             while True:
                 try:
@@ -58,11 +73,12 @@ class Scan():
                     continue
 
                 if command == 'quit':
-                    resultq.put((idx, 'quit', None))
                     return
 
                 if command != 'entry':
-                    resultq.put((idx, 'error', command + ':' + dirname))
+                    resultq.put((idx, 'error',
+                                 'command={} basename={} dirname={}'.format(
+                                     command, basename, dirname)))
 
                 working = True
 
@@ -85,27 +101,33 @@ class Scan():
                 if stat.S_ISDIR(statinfo.st_mode):
                     Scan._directory(idx, fulldirname, workq, resultq)
                 else:
-                    Scan._file(idx, fulldirname, workq, resultq)
+                    Scan._file(db, conn, statinfo,
+                               idx, fulldirname, workq, resultq)
 
         assert workq
         assert resultq
         resultq.put((idx, 'starting'), True)
-        internal_worker(idx, workq, resultq)
-        return
+        time.sleep(1)
         try:
-            internal_worker(idx, workq, resultq)
+            db = urfiles.db.DB(config.config)
+            conn = db.connect()
+            internal_worker(db, conn, idx, workq, resultq)
+            conn.commit()
+            conn.close()
         except Exception as exception:
-            resultq.put((idx, 'error', repr(exception)))
+            resultq.put((idx, 'error', traceback.format_exc()))
+        resultq.put((idx, 'stopping'), True)
 
 
     @staticmethod
     def _done_callback(idx, future):
+        INFO('worker %d: done callback', idx)
         exc = future.exception()
         if exc is not None:
-            INFO(idx, 'future.result={}'.format(str(future.result())))
+            INFO('worker %d: %s', idx, str(future.exc))
         result = future.result()
         if result is not None:
-            INFO(idx, 'future.result={}'.format(str(future.result())))
+            INFO('worker %d: %d', idx, str(future.result()))
 
     def scan(self, callback=_log_callback.__func__):
         # Start the workers
@@ -119,7 +141,8 @@ class Scan():
         with concurrent.futures.ProcessPoolExecutor(
                 max_workers=self.max_workers) as executor:
             for idx in range(self.max_workers):
-                future = executor.submit(self._worker, idx, workq, resultq)
+                future = executor.submit(self._worker, self.config, idx, workq,
+                                         resultq)
                 futures.append(future)
                 future.add_done_callback(
                     lambda future, idx=idx: self._done_callback(idx, future))
@@ -136,32 +159,41 @@ class Scan():
                     workq.put(('entry', os.getcwd(), directory))
 
             # Get results
+            results = 0
             working = [True] * self.max_workers
             while True:
                 for idx, future in enumerate(futures):
-                    if not future.running():
-                        INFO('worker {} is no longer running'.format(idx))
+                    if working[idx] and future.done():
+                        INFO('worker %d: no longer running', idx)
                         working[idx] = False
-                        quit()
-#                INFO('workq size = %d', workq.qsize())
-#                INFO('resultq size = %d', resultq.qsize())
                 try:
                     result = resultq.get(False)
+                    results += 1
+                    DEBUG('result=%s', result)
                     if time.time() - message_time > 1.5:
                         message_time = time.time()
-                        INFO('running w=%d r=%d w=%d', workq.qsize(),
-                             resultq.qsize(), sum(working))
+                        INFO('workq=%d resultq=%d workers=%d results=%d',
+                             workq.qsize(), resultq.qsize(), sum(working),
+                             results)
+                    if result[1] == 'metadata':
+                        INFO('metadata=%s', str(result[2]))
                     if result[1] == 'working':
                         working[result[0]] = True
                         continue
                     if result[1] == 'idle':
                         working[result[0]] = False
+                    if result[1] == 'error':
+                        INFO('worker %d: %s', result[0], result[2])
                 except queue.Empty:
-                    INFO('sleeping w=%d r=%d w=%d', workq.qsize(),
-                         resultq.qsize(), sum(working))
+                    INFO('workq=%d resultq=%d workers=%d results=%d',
+                         workq.qsize(), resultq.qsize(), sum(working),
+                         results)
                     time.sleep(1)
-                if workq.qsize() == 0 and sum(working) == 0:
-                    INFO('exiting')
+                if resultq.qsize() == 0 and sum(working) == 0:
+                    INFO('workq=%d resultq=%d workers=%d results=%d',
+                         workq.qsize(), resultq.qsize(), sum(working),
+                         results)
+                    INFO('exiting: %d results', results)
                     break
             for idx in range(self.max_workers):
                 workq.put(('quit', None, None))

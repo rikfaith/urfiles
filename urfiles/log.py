@@ -122,13 +122,6 @@ class PDLog():
         sys.exit(1)
 
     @staticmethod
-    def decode(message, *args, **kwargs):
-        exc_type, exc_value = sys.exc_info()[:2]
-        exc = traceback.format_exception_only(exc_type, exc_value)
-        logging.error(message + ': ' + exc[0].strip(), *args, **kwargs,
-                      extra={'_depth': 1})
-
-    @staticmethod
     def get_stack_from_traceback(exc_traceback):
         tback = traceback.extract_tb(exc_traceback, limit=5)
         stack = ''
@@ -137,6 +130,14 @@ class PDLog():
                 stack += '; '
             stack += '%s:%s' % (os.path.basename(filename), lineno)
         return stack
+
+    @staticmethod
+    def decode(message, *args, **kwargs):
+        exc_type, exc_value, exc_traceback = sys.exc_info()
+        exc = traceback.format_exception_only(exc_type, exc_value)
+        stack = PDLog.get_stack_from_traceback(exc_traceback)
+        logging.error(message + ' (%s)' % stack + ': ' + exc[0].strip(),
+                      *args, **kwargs, extra={'_depth': 1})
 
     @staticmethod
     def traceback(exc_traceback, message, *args, **kwargs):
