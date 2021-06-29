@@ -2,6 +2,7 @@
 # db.py -*-python-*-
 
 import os
+import json
 
 try:
     import psycopg2
@@ -293,13 +294,14 @@ class DB():
         curr.close()
         return metadata
 
-    def insert_file(self, conn, md5sum, bytes, mtime_ns, json):
+    def insert_file(self, conn, md5sum, bytes, mtime_ns, metadata):
         commands = [
-            '''insert into file(md5sum, bytes, mtime_ns) values(%s,%s,%s)
-            returning file_id;'''
+            '''insert into file(md5sum, bytes, mtime_ns, metadata)
+            values(%s,%s,%s,%s) returning file_id;'''
             ]
         retcode, _, curr = self._execute(commands,
-                                         (md5sum, bytes, mtime_ns, json,),
+                                         (md5sum, bytes, mtime_ns,
+                                          json.dumps(metadata),),
                                          conn=conn, commit=False)
         file_id = None
         if retcode:

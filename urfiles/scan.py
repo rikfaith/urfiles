@@ -12,6 +12,7 @@ import sys
 import time
 import traceback
 import urfiles.config
+import urfiles.identify
 
 # pylint: disable=unused-import
 from urfiles.log import DEBUG, INFO, ERROR, FATAL
@@ -48,13 +49,24 @@ class Scan():
         ids = db.lookup_path(conn, path)
         INFO('ids=%s', str(repr(ids)))
         for id in ids:
-            metadata = db.lookup_file(conn, id)
-            resultq.put((idx, 'metadata', metadata))
-            _, md5sum, bytes, mtime_ns = metadata
+            record = db.lookup_file(conn, id)
+            resultq.put((idx, 'record', record))
+            _, md5sum, bytes, mtime_ns, metadata = record
             if bytes == statinfo.st_size and mtime_ns == statinfo.st_mtime_ns:
                 return
-        file_id = db.insert_file(conn, 0, statinfo.st_size,
-                                 statinfo.st_mtime_ns)
+
+        # This file has a new size or timestamp. Get new metadata.
+        identify = urfiles.identify.Identify(path)
+        metadata = identify.id()
+
+        # If this is not a file or directory (e.g., a socket), skip it.
+        if metadata['type'] == 'unknown':
+            return
+        if 'md5' not in metadata:
+            ERROR('path=%s metadata=%s', path, metadata)
+
+        file_id = db.insert_file(conn, metadata['md5'], statinfo.st_size,
+                                 statinfo.st_mtime_ns, metadata)
         if file_id is not None:
             db.insert_path(conn, path, file_id)
 
