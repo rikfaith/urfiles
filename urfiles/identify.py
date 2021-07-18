@@ -77,7 +77,8 @@ class Identify():
         result = dict()
         mi = pymediainfo.MediaInfo.parse(self.file, cover_data=True)
         if self.debug:
-            print(json.dumps(json.loads(mi.to_json()), indent=4, sort_keys=False))
+            print(json.dumps(json.loads(mi.to_json()), indent=4,
+                             sort_keys=False))
         for track in mi.tracks:
             if track.track_type == 'General':
                 self._extract_general(result, track)

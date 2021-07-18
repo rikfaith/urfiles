@@ -12,6 +12,7 @@ import sys
 import time
 import traceback
 import urfiles.config
+import urfiles.db
 import urfiles.identify
 
 # pylint: disable=unused-import

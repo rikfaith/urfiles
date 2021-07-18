@@ -259,14 +259,14 @@ class DB():
             '''select * from %s;'''
             ]
 
-        retcode, conn, curr = self._execute(commands,
-                                            (psycopg2.extensions.AsIs(table),),
-                                            close=False)
+        retcode, conn, cur = self._execute(commands,
+                                           (psycopg2.extensions.AsIs(table),),
+                                           close=False)
         rows = []
         if retcode:
-            for row in curr:
+            for row in cur:
                 rows.append(row)
-        curr.close()
+        cur.close()
         conn.close()
         return rows
 
@@ -274,14 +274,14 @@ class DB():
         commands = [
             '''select file_ids from path where path=%s;''',
             ]
-        retcode, _, curr = self._execute(commands, (path,), conn=conn)
+        retcode, _, cur = self._execute(commands, (path,), conn=conn)
 
         ids = []
         if retcode:
-            result = curr.fetchone()
+            result = cur.fetchone()
             if result is not None:
                 ids = result[0]
-        curr.close()
+        cur.close()
         return ids
 
     def lookup_file(self, conn, file_id):
@@ -289,9 +289,9 @@ class DB():
         commands = [
             '''select * from file where file_id=%s;''',
             ]
-        retcode, _, curr = self._execute(commands, (file_id,), conn=conn)
-        metadata = curr.fetchone() if retcode else None
-        curr.close()
+        retcode, _, cur = self._execute(commands, (file_id,), conn=conn)
+        metadata = cur.fetchone() if retcode else None
+        cur.close()
         return metadata
 
     def insert_file(self, conn, md5sum, bytes, mtime_ns, metadata):
@@ -299,16 +299,16 @@ class DB():
             '''insert into file(md5sum, bytes, mtime_ns, metadata)
             values(%s,%s,%s,%s) returning file_id;'''
             ]
-        retcode, _, curr = self._execute(commands,
-                                         (md5sum, bytes, mtime_ns,
-                                          json.dumps(metadata),),
-                                         conn=conn, commit=False)
+        retcode, _, cur = self._execute(commands,
+                                        (md5sum, bytes, mtime_ns,
+                                         json.dumps(metadata),),
+                                        conn=conn, commit=False)
         file_id = None
         if retcode:
-            result = curr.fetchone()
+            result = cur.fetchone()
             if result is not None:
                 file_id = result[0]
-        curr.close()
+        cur.close()
         return file_id
 
     def insert_path(self, conn, path, file_id):
@@ -319,3 +319,19 @@ class DB():
         retcode, _, _ = self._execute(commands, (path, [file_id], file_id),
                                         conn=conn, commit=False)
         return retcode
+
+    def re_path(self, conn, re):
+        commands = [
+            '''select path, file_ids from path where path ~ %s;''',
+            ]
+        retcode, _, cur = self._execute(commands, (re,), conn=conn)
+
+        paths = []
+        if retcode:
+            while True:
+                result = cur.fetchone()
+                if result is None:
+                    break
+                paths.append(result)
+        cur.close()
+        return paths
