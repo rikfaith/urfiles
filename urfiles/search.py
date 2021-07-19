@@ -1,10 +1,12 @@
 #!/usr/bin/env python3
 # search.py -*-python-*-
 
+import traceback
 import urfiles.config
 
 # pylint: disable=unused-import
 from urfiles.log import DEBUG, INFO, ERROR, FATAL
+
 
 class Search():
     def __init__(self, expr, config, debug=False):
@@ -25,8 +27,8 @@ class Search():
         meta = dict()
         for path, ids in path_ids:
             result[path] = []
-            for id in ids:
-                filedata = db.lookup_file(conn, id)
+            for file_id in ids:
+                filedata = db.lookup_file(conn, file_id)
                 result[path].append(filedata)
                 _, md5, _, _ = filedata
                 if md5 not in meta:

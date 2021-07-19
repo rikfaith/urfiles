@@ -7,6 +7,7 @@ import os
 # pylint: disable=unused-import
 from urfiles.log import PDLOG_SET_LEVEL, DEBUG, INFO, ERROR, FATAL, DECODE
 
+
 class Config():
     def __init__(self, paths=['/etc/urfiles', '~/.config/urfiles',
                               '~/.urfiles']):
@@ -32,4 +33,3 @@ class Config():
 
         if error != '':
             FATAL(error)
-

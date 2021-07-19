@@ -17,17 +17,19 @@ except ImportError as e:
     print('''\
 # Cannot import magic: {}
 # Consider: apt-get install python3-magic'''.format(e))
-    raise SystemExit
+    raise SystemExit from e
+
 try:
     import pymediainfo
 except ImportError as e:
     print('''\
 # Cannot import pymediainfo: {}
 # Consider: apt-get install python3-pymediainfo'''.format(e))
-    raise SystemExit
+    raise SystemExit from e
 
 # pylint: disable=unused-import
 from urfiles.log import DEBUG, INFO, ERROR, FATAL
+
 
 class Identify():
     def __init__(self, file, block_size=2**20, debug=False):
@@ -35,9 +37,10 @@ class Identify():
         self.block_size = block_size
         self.debug = debug
 
-    def _add(self, result, field, data, append=False, force=False):
+    @staticmethod
+    def _add(result, field, data, append=False, force=False):
         if data is not None:
-            if type(data) == str and len(data) > 20:
+            if isinstance(data, str) and len(data) > 20:
                 data = re.sub(' /.*', '', data)
             if force or field not in result:
                 result[field] = data
@@ -97,11 +100,12 @@ class Identify():
         proc = subprocess.run(['exiftool', '-c', '%f', '-j',
                                self.file],
                               capture_output=True,
-                              text=True)
+                              text=True,
+                              check=False)
         if proc.returncode != 0:
             return result
 
-        metadata =  json.loads(proc.stdout)[0]
+        metadata = json.loads(proc.stdout)[0]
         if self.debug:
             print(json.dumps(metadata, indent=4, sort_keys=False))
 

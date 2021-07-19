@@ -3,8 +3,6 @@
 
 import argparse
 import os
-import re
-import time
 import urfiles.config
 import urfiles.db
 import urfiles.format
@@ -14,6 +12,7 @@ import urfiles.search
 
 # pylint: disable=unused-import
 from urfiles.log import PDLOG_SET_LEVEL, DEBUG, INFO, ERROR, FATAL
+
 
 def main():
     parser = argparse.ArgumentParser(description='urfiles')
@@ -62,7 +61,7 @@ def main():
         for section in config.config.sections():
             print('  [{}]'.format(section))
             for key, value in config.config[section].items():
-                  print('    {} = {}'.format(key, value))
+                print('    {} = {}'.format(key, value))
         return 0
 
     if args.id:

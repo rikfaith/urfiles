@@ -1,7 +1,6 @@
 #!/usr/bin/env python3
 # db.py -*-python-*-
 
-import os
 import json
 
 try:
@@ -10,14 +9,17 @@ except ImportError as e:
     print('''\
 # Cannot import psycopg2: {}
 # Consider: apt-get install python3-psycopg2'''.format(e))
-    raise SystemExit
+    raise SystemExit from e
 
+# pylint: disable=unused-import
 from urfiles.log import PDLOG_SET_LEVEL, DEBUG, INFO, ERROR, FATAL, DECODE
+
 
 class DB():
     def __init__(self, config, section='postgresql'):
         self.config = config
         self.section = section
+        self.conn = None
 
         if self.section not in self.config:
             FATAL('Configuration file is missing the [%s] section',
@@ -27,7 +29,8 @@ class DB():
         for key, value in self.config[self.section].items():
             self.params[key] = value
 
-    def _connect(self, params, autocommit=False, use_schema=True):
+    @staticmethod
+    def _connect(params, autocommit=False, use_schema=True):
         try:
             conn = psycopg2.connect(**params)
             conn.autocommit = autocommit
@@ -43,7 +46,7 @@ class DB():
                  use_schema=True, use_database=True, close=None,
                  commit=True):
         DEBUG('autocommit=%s use_schema=%s use_database=%s close=%s commit=%s',
-             autocommit, use_schema, use_database, close, commit)
+              autocommit, use_schema, use_database, close, commit)
         retcode = True
         if use_database or 'database' not in self.params:
             params = self.params
@@ -76,7 +79,7 @@ class DB():
 
         if commit:
             conn.commit()
-        if close == True:
+        if close is True:
             cur.close()
             cur = None
             conn.close()
@@ -107,7 +110,7 @@ class DB():
     def _create_database(self):
         commands = [
             "create database {} with encoding='UTF8'".
-                format(self.params['database']),
+            format(self.params['database']),
 
             '''create schema urfiles'''
             ]
@@ -248,11 +251,6 @@ class DB():
 
         return output
 
-    def connect(self):
-        # FIXME we should have two different sets of params.
-        self.conn = self._connect(self.params)
-        return self.conn
-
     def fetch_rows(self, table):
         commands = [
             '''select * from %s;'''
@@ -275,7 +273,7 @@ class DB():
             on conflict(path) do update set file_ids=%s||path.file_ids;'''
             ]
         retcode, _, _ = self._execute(commands, (path, [file_id], file_id),
-                                        conn=conn, commit=False)
+                                      conn=conn, commit=False)
         return retcode
 
     def lookup_path(self, conn, path):
@@ -308,13 +306,13 @@ class DB():
         cur.close()
         return paths
 
-    def insert_file(self, conn, md5, bytes, mtime_ns):
+    def insert_file(self, conn, md5, size, mtime_ns):
         commands = [
-            '''insert into file(md5, bytes, mtime_ns)
+            '''insert into file(md5, size, mtime_ns)
             values(%s,%s,%s) returning file_id;'''
             ]
         retcode, _, cur = self._execute(commands,
-                                        (md5, bytes, mtime_ns,),
+                                        (md5, size, mtime_ns,),
                                         conn=conn, commit=False)
         file_id = None
         if retcode:
@@ -337,10 +335,9 @@ class DB():
         commands = [
             '''insert into meta(md5, metadata) values(%s,%s);'''
             ]
-        retcode, _, cur = self._execute(commands, (md5, json.dumps(metadata),),
-                                        conn=conn, commit=False)
+        retcode, _, _ = self._execute(commands, (md5, json.dumps(metadata),),
+                                      conn=conn, commit=False)
         return retcode
-
 
     def lookup_meta(self, conn, md5):
         commands = [

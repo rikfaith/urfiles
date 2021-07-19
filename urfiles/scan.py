@@ -3,12 +3,10 @@
 
 # We use multiprocessing.Queue, so importing queue only for queue.Empty
 import concurrent.futures
-import hashlib
 import multiprocessing
 import os
 import queue
 import stat
-import sys
 import time
 import traceback
 import urfiles.config
@@ -18,7 +16,10 @@ import urfiles.identify
 # pylint: disable=unused-import
 from urfiles.log import DEBUG, INFO, ERROR, FATAL
 
+
 class Scan():
+    MAX_MESSAGE_TYPE = 9
+
     def __init__(self, directories, config, max_workers=3, debug=False):
         self.directories = directories
         self.config = config
@@ -28,7 +29,7 @@ class Scan():
     @staticmethod
     def _log_callback(target, msg_type, debug_info, msg):
         code = 'C>!SRXDIEF'[msg_type] \
-            if msg_type <= Pool.MT_MAX_MESSAGE_TYPE else '?'
+            if msg_type <= Scan.MAX_MESSAGE_TYPE else '?'
         if debug_info and len(debug_info) > 0:
             INFO(":%c:%s: %s %s", code, target, debug_info, msg)
         else:
@@ -49,11 +50,11 @@ class Scan():
     def _file(db, conn, statinfo, idx, path, workq, resultq):
         ids = db.lookup_path(conn, path)
         INFO('ids=%s', str(repr(ids)))
-        for id in ids:
-            record = db.lookup_file(conn, id)
+        for file_id in ids:
+            record = db.lookup_file(conn, file_id)
             resultq.put((idx, 'record', record))
-            _, md5, bytes, mtime_ns = record
-            if bytes == statinfo.st_size and mtime_ns == statinfo.st_mtime_ns:
+            _, md5, size, mtime_ns = record
+            if size == statinfo.st_size and mtime_ns == statinfo.st_mtime_ns:
                 return
 
         # This file has a new size or timestamp. Get new metadata.
@@ -138,7 +139,6 @@ class Scan():
         except Exception as exception:
             resultq.put((idx, 'error', traceback.format_exc()))
         resultq.put((idx, 'stopping'), True)
-
 
     @staticmethod
     def _done_callback(idx, future):
