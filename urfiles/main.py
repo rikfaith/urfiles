@@ -40,6 +40,9 @@ def main():
                         help='Output verbose debugging messages')
     parser.add_argument('--id', default=None, nargs='+', metavar=('FILE'),
                         help='Identify files (does not use database)')
+    parser.add_argument('--full', action='store_true', default=False,
+                        help='When identifying a file, calculate md5;'
+                        ' when searching, print metadata')
 
     # Searching
     parser.add_argument('--re', default=None, metavar=('RE'),
@@ -67,9 +70,12 @@ def main():
             fmt = urfiles.format.Format(debug=args.debug)
             statinfo = os.stat(file)
             identify = urfiles.identify.Identify(file, debug=args.debug)
-            print(fmt.pretty_print({file: [(-1, 0, statinfo.st_size,
-                                            statinfo.st_mtime_ns,
-                                            identify.id())]}))
+            md5, meta = identify.id(checksum=args.full)
+            print(fmt.pretty_print({file: [(-1, md5, statinfo.st_size,
+                                            statinfo.st_mtime_ns)]},
+                                   {md5: meta},
+                                   full=args.full),
+                  end='')
         return 0
 
     db = urfiles.db.DB(config.config)
@@ -97,9 +103,9 @@ def main():
 
     if args.re:
         search = urfiles.search.Search(args.re, config, debug=args.debug)
-        result = search.re()
+        result, meta = search.re()
         fmt = urfiles.format.Format(debug=args.debug)
-        print(fmt.pretty_print(result))
+        print(fmt.pretty_print(result, meta, full=args.full), end='')
         return 0
 
     if args.scan is None:

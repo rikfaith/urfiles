@@ -9,6 +9,7 @@ except ImportError as e:
 # Consider: apt-get install python3-humanize'''.format(e))
     raise SystemExit
 
+import json
 import time
 
 # pylint: disable=unused-import
@@ -21,19 +22,35 @@ class Format():
     def human(self, value):
         return value
 
-    # Data is a dictionary of path -> metadata. Return a pretty string.
-    def pretty_print(self, data, full=True):
+    def pretty_print(self, data, meta=None, full=False):
+        seen = set()
         result = ''
         if self.debug:
             print(sorted(data.items()))
-        for path, metadatas in sorted(data.items()):
+        for path, filedatas in sorted(data.items()):
+            first = False
             result += path + '\n'
-            for metadata in metadatas:
-                file_id, md5sum, bytes, mtime_ns, meta = metadata
-                result += '    {} ({}) {} {}\n'.format(
+            for filedata in filedatas:
+                file_id, md5, bytes, mtime_ns = filedata
+                result += '    {} ({}) {}'.format(
                     bytes,
                     humanize.naturalsize(bytes, binary=True),
                     time.strftime('%Y %b %d %H:%M',
-                                  time.localtime(mtime_ns // 1e9)),
-                    md5sum if md5sum != 0 else '')
+                                  time.localtime(mtime_ns // 1e9)))
+                if md5 != 0:
+                    result += ' {}'.format(md5)
+                if meta and md5 in meta and md5 not in seen:
+                    if full:
+                        formatted = json.dumps(meta[md5], indent=4,
+                                               sort_keys=False)
+                        padded = '    '.join(formatted.splitlines(True))
+                        result += '    {}'.format(padded)
+                    else:
+                        if 'format' in meta[md5]:
+                            result += ' {}'.format(meta[md5]['format'])
+                        if 'width' in meta[md5] and 'height' in meta[md5]:
+                            result += ' {}x{}'.format(meta[md5]['width'],
+                                                      meta[md5]['height'])
+                    seen.add(md5)
+                result += '\n'
         return result

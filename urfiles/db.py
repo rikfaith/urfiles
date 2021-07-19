@@ -85,11 +85,6 @@ class DB():
 
     def _maybe_create_tables(self):
         commands = [
-            '''create table if not exists hash (
-            md5sum text primary key,
-            bytes int
-            )''',
-
             '''create table if not exists path (
             path text primary key,
             file_ids int[]
@@ -97,11 +92,15 @@ class DB():
 
             '''create table if not exists file (
             file_id serial primary key,
-            md5sum text,
+            md5 text,
             bytes int,
-            mtime_ns bigint,
-            metadata json
+            mtime_ns bigint
             )''',
+
+            '''create table if not exists meta (
+            md5 text primary key,
+            metadata json
+            )'''
             ]
         return self._execute(commands)[0]
 
@@ -270,6 +269,15 @@ class DB():
         conn.close()
         return rows
 
+    def insert_path(self, conn, path, file_id):
+        commands = [
+            '''insert into path(path,file_ids) values(%s,%s)
+            on conflict(path) do update set file_ids=%s||path.file_ids;'''
+            ]
+        retcode, _, _ = self._execute(commands, (path, [file_id], file_id),
+                                        conn=conn, commit=False)
+        return retcode
+
     def lookup_path(self, conn, path):
         commands = [
             '''select file_ids from path where path=%s;''',
@@ -283,42 +291,6 @@ class DB():
                 ids = result[0]
         cur.close()
         return ids
-
-    def lookup_file(self, conn, file_id):
-        INFO('file_id=%s', repr(file_id))
-        commands = [
-            '''select * from file where file_id=%s;''',
-            ]
-        retcode, _, cur = self._execute(commands, (file_id,), conn=conn)
-        metadata = cur.fetchone() if retcode else None
-        cur.close()
-        return metadata
-
-    def insert_file(self, conn, md5sum, bytes, mtime_ns, metadata):
-        commands = [
-            '''insert into file(md5sum, bytes, mtime_ns, metadata)
-            values(%s,%s,%s,%s) returning file_id;'''
-            ]
-        retcode, _, cur = self._execute(commands,
-                                        (md5sum, bytes, mtime_ns,
-                                         json.dumps(metadata),),
-                                        conn=conn, commit=False)
-        file_id = None
-        if retcode:
-            result = cur.fetchone()
-            if result is not None:
-                file_id = result[0]
-        cur.close()
-        return file_id
-
-    def insert_path(self, conn, path, file_id):
-        commands = [
-            '''insert into path(path,file_ids) values(%s,%s)
-            on conflict(path) do update set file_ids=%s||path.file_ids;'''
-            ]
-        retcode, _, _ = self._execute(commands, (path, [file_id], file_id),
-                                        conn=conn, commit=False)
-        return retcode
 
     def re_path(self, conn, re):
         commands = [
@@ -335,3 +307,46 @@ class DB():
                 paths.append(result)
         cur.close()
         return paths
+
+    def insert_file(self, conn, md5, bytes, mtime_ns):
+        commands = [
+            '''insert into file(md5, bytes, mtime_ns)
+            values(%s,%s,%s) returning file_id;'''
+            ]
+        retcode, _, cur = self._execute(commands,
+                                        (md5, bytes, mtime_ns,),
+                                        conn=conn, commit=False)
+        file_id = None
+        if retcode:
+            result = cur.fetchone()
+            if result is not None:
+                file_id = result[0]
+        cur.close()
+        return file_id
+
+    def lookup_file(self, conn, file_id):
+        commands = [
+            '''select * from file where file_id=%s;''',
+            ]
+        retcode, _, cur = self._execute(commands, (file_id,), conn=conn)
+        filedata = cur.fetchone() if retcode else None
+        cur.close()
+        return filedata
+
+    def insert_meta(self, conn, md5, metadata):
+        commands = [
+            '''insert into meta(md5, metadata) values(%s,%s);'''
+            ]
+        retcode, _, cur = self._execute(commands, (md5, json.dumps(metadata),),
+                                        conn=conn, commit=False)
+        return retcode
+
+
+    def lookup_meta(self, conn, md5):
+        commands = [
+            '''select * from meta where md5=%s;''',
+            ]
+        retcode, _, cur = self._execute(commands, (md5,), conn=conn)
+        metadata = cur.fetchone()[1] if retcode else None
+        cur.close()
+        return metadata

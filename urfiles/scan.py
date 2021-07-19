@@ -52,24 +52,32 @@ class Scan():
         for id in ids:
             record = db.lookup_file(conn, id)
             resultq.put((idx, 'record', record))
-            _, md5sum, bytes, mtime_ns, metadata = record
+            _, md5, bytes, mtime_ns = record
             if bytes == statinfo.st_size and mtime_ns == statinfo.st_mtime_ns:
                 return
 
         # This file has a new size or timestamp. Get new metadata.
         identify = urfiles.identify.Identify(path)
-        metadata = identify.id()
+        md5, metadata = identify.id()
 
         # If this is not a file or directory (e.g., a socket), skip it.
         if metadata['type'] == 'unknown':
             return
-        if 'md5' not in metadata:
+        if md5 == 0:
             ERROR('path=%s metadata=%s', path, metadata)
 
-        file_id = db.insert_file(conn, metadata['md5'], statinfo.st_size,
-                                 statinfo.st_mtime_ns, metadata)
+        file_id = db.insert_file(conn, md5, statinfo.st_size,
+                                 statinfo.st_mtime_ns)
         if file_id is not None:
             db.insert_path(conn, path, file_id)
+
+        # Do we already have metadata for this md5?
+        existing_metadata = db.lookup_meta(conn, md5)
+        if not existing_metadata:
+            db.insert_meta(conn, md5, metadata)
+        elif metadata != existing_metadata:
+            INFO(repr(metadata))
+            ERROR(repr(existing_metadata))
 
     @staticmethod
     def _worker(config, idx, workq, resultq):

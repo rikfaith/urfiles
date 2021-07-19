@@ -140,6 +140,7 @@ class Identify():
 
     def id(self, checksum=True):
         result = dict()
+        md5 = 0
         if os.path.isfile(self.file):
             result['type'] = 'file'
             result.update(self.mediainfo())
@@ -150,11 +151,12 @@ class Identify():
             # well get exif for every file
             result.update(self.exinfo())
 
-            result['md5'] = self.md5()
+            if checksum:
+                md5 = self.md5()
         elif os.path.isdir(self.file):
             result['type'] = 'directory'
         elif os.path.islink(self.file):
             result['type'] = 'link'
         else:
             result['type'] = 'unknown'
-        return result
+        return md5, result

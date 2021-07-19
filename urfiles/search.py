@@ -22,11 +22,15 @@ class Search():
         path_ids = db.re_path(conn, self.expr)
 
         result = dict()
+        meta = dict()
         for path, ids in path_ids:
             result[path] = []
             for id in ids:
-                metadata = db.lookup_file(conn, id)
-                result[path].append(metadata)
+                filedata = db.lookup_file(conn, id)
+                result[path].append(filedata)
+                _, md5, _, _ = filedata
+                if md5 not in meta:
+                    meta[md5] = db.lookup_meta(conn, md5)
 
         conn.close()
-        return result
+        return result, meta
