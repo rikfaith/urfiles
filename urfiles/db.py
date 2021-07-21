@@ -96,7 +96,7 @@ class DB():
             '''create table if not exists file (
             file_id serial primary key,
             md5 text,
-            bytes int,
+            bytes bigint,
             mtime_ns bigint
             )''',
 
@@ -308,7 +308,7 @@ class DB():
 
     def insert_file(self, conn, md5, size, mtime_ns):
         commands = [
-            '''insert into file(md5, size, mtime_ns)
+            '''insert into file(md5, bytes, mtime_ns)
             values(%s,%s,%s) returning file_id;'''
             ]
         retcode, _, cur = self._execute(commands,

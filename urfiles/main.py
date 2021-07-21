@@ -7,6 +7,7 @@ import urfiles.config
 import urfiles.db
 import urfiles.format
 import urfiles.identify
+import urfiles.load
 import urfiles.scan
 import urfiles.search
 
@@ -35,6 +36,8 @@ def main():
     # Scanning
     parser.add_argument('--scan', default=None, nargs='+', metavar=('DIR'),
                         help='Directory trees to scan')
+    parser.add_argument('--load', default=None, nargs='+', metavar=('DIR'),
+                        help='Load tape archive files (md5sum.txt, stat.txt)')
     parser.add_argument('--debug', action='store_true', default=False,
                         help='Output verbose debugging messages')
     parser.add_argument('--id', default=None, nargs='+', metavar=('FILE'),
@@ -107,10 +110,16 @@ def main():
         print(fmt.pretty_print(result, meta, full=args.full), end='')
         return 0
 
-    if args.scan is None:
-        parser.print_help()
-        return -1
+    if args.scan or args.load:
+        # FIXME If we add an index for md5, then we may want to drop it before
+        # updating the database, and then recreate it afterward. (Or similar.)
+        if args.scan:
+            scan = urfiles.scan.Scan(args.scan, config, debug=args.debug)
+            scan.scan()
+        if args.load:
+            load = urfiles.load.Load(args.load, config, debug=args.debug)
+            load.load()
+        return 0
 
-    scan = urfiles.scan.Scan(args.scan, config, debug=args.debug)
-    scan.scan()
-    return 0
+    parser.print_help()
+    return -1
