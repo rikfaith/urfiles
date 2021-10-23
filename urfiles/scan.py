@@ -20,9 +20,14 @@ from urfiles.log import DEBUG, INFO, ERROR, FATAL
 class Scan():
     MAX_MESSAGE_TYPE = 9
 
-    def __init__(self, directories, config, max_workers=3, debug=False):
+    def __init__(self, directories, config, source=None, max_workers=3,
+                 debug=False):
         self.directories = directories
         self.config = config
+        if source is not None:
+            self.source = source
+        else:
+            self.source = ''
         self.max_workers = max_workers
         self.debug = debug
 
@@ -47,15 +52,11 @@ class Scan():
                 workq.put(('entry', dirname, entry.name))
 
     @staticmethod
-    def _file(db, conn, statinfo, idx, path, workq, resultq):
-        ids = db.lookup_path(conn, path)
-        INFO('ids=%s', str(repr(ids)))
-        for file_id in ids:
-            record = db.lookup_file(conn, file_id)
-            resultq.put((idx, 'record', record))
-            _, md5, size, mtime_ns = record
-            if size == statinfo.st_size and mtime_ns == statinfo.st_mtime_ns:
-                return
+    def _file(db, conn, statinfo, idx, path, source, workq, resultq):
+        md5 = db.lookup_path(conn, path, statinfo.st_size,
+                             statinfo.st_mtime_ns)
+        if md5 is not None:
+            return
 
         # This file has a new size or timestamp. Get new metadata.
         identify = urfiles.identify.Identify(path)
@@ -67,10 +68,8 @@ class Scan():
         if md5 == 0:
             ERROR('path=%s metadata=%s', path, metadata)
 
-        file_id = db.insert_file(conn, md5, statinfo.st_size,
-                                 statinfo.st_mtime_ns)
-        if file_id is not None:
-            db.insert_path(conn, path, file_id)
+        db.insert_path(conn, path, source, statinfo.st_size,
+                       statinfo.st_mtime_ns, md5)
 
         # Do we already have metadata for this md5?
         existing_metadata = db.lookup_meta(conn, md5)
@@ -81,8 +80,8 @@ class Scan():
             ERROR(repr(existing_metadata))
 
     @staticmethod
-    def _worker(config, idx, workq, resultq):
-        def internal_worker(db, conn, idx, workq, resultq):
+    def _worker(config, idx, workq, resultq, source):
+        def internal_worker(db, conn, idx, workq, resultq, source):
             working = True
             while True:
                 try:
@@ -124,7 +123,7 @@ class Scan():
                     Scan._directory(idx, fulldirname, workq, resultq)
                 else:
                     Scan._file(db, conn, statinfo,
-                               idx, fulldirname, workq, resultq)
+                               idx, fulldirname, source, workq, resultq)
 
         assert workq
         assert resultq
@@ -133,7 +132,7 @@ class Scan():
         try:
             db = urfiles.db.DB(config.config)
             conn = db.connect()
-            internal_worker(db, conn, idx, workq, resultq)
+            internal_worker(db, conn, idx, workq, resultq, source)
             conn.commit()
             conn.close()
         except Exception as exception:
@@ -163,7 +162,7 @@ class Scan():
                 max_workers=self.max_workers) as executor:
             for idx in range(self.max_workers):
                 future = executor.submit(self._worker, self.config, idx, workq,
-                                         resultq)
+                                         resultq, self.source)
                 futures.append(future)
                 future.add_done_callback(
                     lambda future, idx=idx: self._done_callback(idx, future))

@@ -79,6 +79,7 @@ class Identify():
     def mediainfo(self):
         result = dict()
         mi = pymediainfo.MediaInfo.parse(self.file, cover_data=True)
+
         if self.debug:
             print(json.dumps(json.loads(mi.to_json()), indent=4,
                              sort_keys=False))
@@ -147,16 +148,17 @@ class Identify():
         md5 = 0
         if os.path.isfile(self.file):
             result['type'] = 'file'
-            result.update(self.mediainfo())
-            if 'format' not in result:
-                result['magic'] = magic.from_file(self.file)
+            if os.access(self.file, os.R_OK):
+                result.update(self.mediainfo())
+                if 'format' not in result:
+                    result['magic'] = magic.from_file(self.file)
 
-            # Was originall only for PDF, JPEG, TIFF, and PNG, but might as
-            # well get exif for every file
-            result.update(self.exinfo())
+                # Was originall only for PDF, JPEG, TIFF, and PNG, but might as
+                # well get exif for every file
+                result.update(self.exinfo())
 
-            if checksum:
-                md5 = self.md5()
+                if checksum:
+                    md5 = self.md5()
         elif os.path.isdir(self.file):
             result['type'] = 'directory'
         elif os.path.islink(self.file):

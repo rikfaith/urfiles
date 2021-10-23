@@ -38,6 +38,8 @@ def main():
                         help='Directory trees to scan')
     parser.add_argument('--load', default=None, nargs='+', metavar=('DIR'),
                         help='Load tape archive files (md5sum.txt, stat.txt)')
+    parser.add_argument('--source', default=None,
+                        help='SOURCE tag for path entry')
     parser.add_argument('--debug', action='store_true', default=False,
                         help='Output verbose debugging messages')
     parser.add_argument('--id', default=None, nargs='+', metavar=('FILE'),
@@ -114,10 +116,12 @@ def main():
         # FIXME If we add an index for md5, then we may want to drop it before
         # updating the database, and then recreate it afterward. (Or similar.)
         if args.scan:
-            scan = urfiles.scan.Scan(args.scan, config, debug=args.debug)
+            scan = urfiles.scan.Scan(args.scan, config, source=args.source,
+                                     debug=args.debug)
             scan.scan()
         if args.load:
-            load = urfiles.load.Load(args.load, config, debug=args.debug)
+            load = urfiles.load.Load(args.load, config, source=args.source,
+                                     debug=args.debug)
             load.load()
         return 0
 

@@ -89,22 +89,19 @@ class DB():
     def _maybe_create_tables(self):
         commands = [
             '''create table if not exists path (
-            path text primary key,
-            file_ids int[]
-            )''',
-
-            '''create table if not exists file (
-            file_id serial primary key,
-            md5 text,
+            path text,
+            source text,
             bytes bigint,
-            mtime_ns bigint
+            mtime_ns bigint,
+            md5 text,
+            primary key(path, source, bytes, mtime_ns)
             )''',
 
             '''create table if not exists meta (
             md5 text primary key,
             metadata json
             )'''
-            ]
+        ]
         return self._execute(commands)[0]
 
     def _create_database(self):
@@ -113,7 +110,7 @@ class DB():
             format(self.params['database']),
 
             '''create schema urfiles'''
-            ]
+        ]
         return self._execute(commands, use_database=False, use_schema=False,
                              autocommit=True)[0]
 
@@ -254,7 +251,7 @@ class DB():
     def fetch_rows(self, table):
         commands = [
             '''select * from %s;'''
-            ]
+        ]
 
         retcode, conn, cur = self._execute(commands,
                                            (psycopg2.extensions.AsIs(table),),
@@ -267,33 +264,61 @@ class DB():
         conn.close()
         return rows
 
-    def insert_path(self, conn, path, file_id):
+    def fetch_md5s(self):
         commands = [
-            '''insert into path(path,file_ids) values(%s,%s)
-            on conflict(path) do update set file_ids=%s||path.file_ids;'''
-            ]
-        retcode, _, _ = self._execute(commands, (path, [file_id], file_id),
+            '''select md5 from meta;'''
+        ]
+
+        retcode, conn, cur = self._execute(commands, close=False)
+        md5s = set()
+        if retcode:
+            for row in cur:
+                md5s.add(row[0])
+        cur.close()
+        conn.close()
+        return md5s
+
+    def fetch_paths(self, source):
+        commands = [
+            '''select path from path where source=%s;'''
+        ]
+
+        retcode, conn, cur = self._execute(commands, (source,), close=False)
+        paths = set()
+        if retcode:
+            for row in cur:
+                paths.add(row[0])
+        cur.close()
+        conn.close()
+        return paths
+
+    def insert_path(self, conn, path, source, size, mtime_ns, md5):
+        commands = [
+            '''insert into path(path,source,bytes,mtime_ns,md5)'''
+            ''' values(%s,%s,%s,%s,%s);'''
+        ]
+        retcode, _, _ = self._execute(commands,
+                                      (path, source, size, mtime_ns, md5),
                                       conn=conn, commit=False)
         return retcode
 
-    def lookup_path(self, conn, path):
+    def lookup_path(self, conn, path, size, mtime_ns):
         commands = [
-            '''select file_ids from path where path=%s;''',
-            ]
-        retcode, _, cur = self._execute(commands, (path,), conn=conn)
+            '''select md5 from path where'''
+            ''' path=%s and bytes=%s and mtime_ns=%s;''',
+        ]
+        retcode, _, cur = self._execute(commands, (path,size,mtime_ns),
+                                        conn=conn)
 
-        ids = []
-        if retcode:
-            result = cur.fetchone()
-            if result is not None:
-                ids = result[0]
+        md5 = cur.fetchone() if retcode else None
         cur.close()
-        return ids
+        return md5
 
     def re_path(self, conn, re):
         commands = [
-            '''select path, file_ids from path where path ~ %s;''',
-            ]
+            '''select path,source,bytes,mtime_ns,md5'''
+            ''' from path where path ~ %s;''',
+        ]
         retcode, _, cur = self._execute(commands, (re,), conn=conn)
 
         paths = []
@@ -306,35 +331,10 @@ class DB():
         cur.close()
         return paths
 
-    def insert_file(self, conn, md5, size, mtime_ns):
-        commands = [
-            '''insert into file(md5, bytes, mtime_ns)
-            values(%s,%s,%s) returning file_id;'''
-            ]
-        retcode, _, cur = self._execute(commands,
-                                        (md5, size, mtime_ns,),
-                                        conn=conn, commit=False)
-        file_id = None
-        if retcode:
-            result = cur.fetchone()
-            if result is not None:
-                file_id = result[0]
-        cur.close()
-        return file_id
-
-    def lookup_file(self, conn, file_id):
-        commands = [
-            '''select * from file where file_id=%s;''',
-            ]
-        retcode, _, cur = self._execute(commands, (file_id,), conn=conn)
-        filedata = cur.fetchone() if retcode else None
-        cur.close()
-        return filedata
-
     def insert_meta(self, conn, md5, metadata):
         commands = [
             '''insert into meta(md5, metadata) values(%s,%s);'''
-            ]
+        ]
         retcode, _, _ = self._execute(commands, (md5, json.dumps(metadata),),
                                       conn=conn, commit=False)
         return retcode
@@ -342,8 +342,23 @@ class DB():
     def lookup_meta(self, conn, md5):
         commands = [
             '''select * from meta where md5=%s;''',
-            ]
-        retcode, _, cur = self._execute(commands, (md5,), conn=conn)
-        metadata = cur.fetchone()[1] if retcode else None
+        ]
+        retcode, _, cur = self._execute(commands, (str(md5),), conn=conn)
+
+        metadata = None
+        if retcode:
+            row = cur.fetchone()
+            if row is not None:
+                metadata = row[0]
         cur.close()
         return metadata
+
+    def bulk_insert(self, conn, path_rows=None, meta_rows=None):
+        cur = conn.cursor()
+        if path_rows:
+            cur.copy_expert("copy path from stdin with delimiter ',' csv",
+                            path_rows)
+        if meta_rows:
+            cur.copy_expert("copy meta from stdin with delimiter ',' csv",
+                            meta_rows)
+        conn.commit()
